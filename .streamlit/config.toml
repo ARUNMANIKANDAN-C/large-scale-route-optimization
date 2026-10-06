@@ -1,0 +1,15 @@
+[theme]
+# Primary accent color for interactive widgets like sliders, buttons, and checkboxes
+primaryColor = "#FF4B4B"
+
+# The main background color of your app
+backgroundColor = "#FFFFFF"
+
+# Background color for the sidebar and structural elements
+secondaryBackgroundColor = "#F0F2F6"
+
+# Main text color
+textColor = "#31333F"
+
+# Pre-defined base theme ("light" or "dark") to inherit default styles
+base = "light"

@@ -280,131 +280,1321 @@ with tab_res:
 # TAB 5 : network & route visualisation
 # =====================================================================================
 with tab_viz:
-    st.subheader("Network & Route Visualization")
+
+    # ============================================================
+    # CARGO LOADING & ROUTE PLANNING
+    # PROFESSIONAL ROUTE ANALYTICS DASHBOARD
+    # ============================================================
+
+    # ------------------------------------------------------------
+    # Custom styling
+    # ------------------------------------------------------------
+    st.markdown("""
+    <style>
+
+    .viz-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin-bottom: 0.15rem;
+    }
+
+    .viz-subtitle {
+        color: #8b949e;
+        font-size: 0.85rem;
+        margin-bottom: 1.2rem;
+    }
+
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 650;
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .status-card {
+        border: 1px solid rgba(128,128,128,0.25);
+        border-radius: 10px;
+        padding: 12px 15px;
+        background: rgba(128,128,128,0.035);
+    }
+
+    .route-pill {
+        display: inline-block;
+        padding: 4px 9px;
+        margin: 2px;
+        border-radius: 12px;
+        background: rgba(50, 150, 250, 0.12);
+        border: 1px solid rgba(50, 150, 250, 0.25);
+        font-size: 0.75rem;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ============================================================
+    # HEADER
+    # ============================================================
+
+    st.markdown(
+        '<div class="viz-title">🚚 Network & Route Analytics</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        '<div class="viz-subtitle">'
+        'Interactive analysis of optimized fleet routes, vehicle utilization, '
+        'delivery schedules and cargo allocation.'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    # ============================================================
+    # CHECK OPTIMIZATION RESULT
+    # ============================================================
+
     if "res" not in st.session_state:
-        st.info("Run an optimization first (in the **Optimize** tab) to see route visualizations.")
-    else:
+
+        st.info(
+            "🚀 **No optimization result available.**\n\n"
+            "Run the optimization from the **Optimize** tab first."
+        )
+
+        st.stop()
+
+    try:
+
         res_v = st.session_state["res"]
+
         Pv, flv, prv = st.session_state["res_ctx"]
-        trucks_v = res_v["trucks"]
-        ftv = {t.name: t for t in flv}
 
-        if not trucks_v:
-            st.warning("The optimization produced no trucks. Try different parameters.")
+        trucks_v = res_v.get("trucks", [])
+
+    except Exception as e:
+
+        st.error(
+            f"Unable to load optimization results: {e}"
+        )
+
+        st.stop()
+
+    if not trucks_v:
+
+        st.warning(
+            "⚠️ The optimization completed, but no trucks were assigned. "
+            "Try changing fleet capacity, demand, or optimization parameters."
+        )
+
+        st.stop()
+
+    # ============================================================
+    # BASIC DATA PREPARATION
+    # ============================================================
+
+    ftv = {
+        t.name: t
+        for t in flv
+    }
+
+    truck_ids = [
+        str(t.get("id", f"Truck-{i+1}"))
+        for i, t in enumerate(trucks_v)
+    ]
+
+    # ------------------------------------------------------------
+    # Layout cache
+    # ------------------------------------------------------------
+
+    try:
+
+        dest_key = tuple(
+            sorted(
+                str(x)
+                for x in Pv.items["d"]
+                .dropna()
+                .unique()
+            )
+        )
+
+        if st.session_state.get("_viz_key") != dest_key:
+
+            with st.spinner("Preparing network layout..."):
+
+                st.session_state["_viz_pos"] = (
+                    viz.compute_layout(Pv)
+                )
+
+            st.session_state["_viz_key"] = dest_key
+
+        positions = st.session_state["_viz_pos"]
+
+    except Exception as e:
+
+        st.error(
+            f"Unable to compute network layout: {e}"
+        )
+
+        st.stop()
+
+    # ============================================================
+    # CALCULATE FLEET METRICS
+    # ============================================================
+
+    total_trucks = len(trucks_v)
+
+    total_items = sum(
+        len(t.get("items", []))
+        for t in trucks_v
+    )
+
+    total_stops = sum(
+        len(t.get("stops", []))
+        for t in trucks_v
+    )
+
+    total_distance = sum(
+        float(t.get("route_km", 0) or 0)
+        for t in trucks_v
+    )
+
+    total_cost = sum(
+        float(t.get("route_cost", 0) or 0)
+        for t in trucks_v
+    )
+
+    valid_route_status = [
+        t for t in trucks_v
+        if t.get("route_ok") is not None
+    ]
+
+    successful_routes = sum(
+        1
+        for t in valid_route_status
+        if bool(t.get("route_ok"))
+    )
+
+    route_success_pct = (
+        successful_routes /
+        len(valid_route_status) * 100
+        if valid_route_status
+        else 0
+    )
+
+    avg_distance = (
+        total_distance / total_trucks
+        if total_trucks
+        else 0
+    )
+
+    avg_items = (
+        total_items / total_trucks
+        if total_trucks
+        else 0
+    )
+
+    # ============================================================
+    # CAPACITY UTILIZATION
+    # ============================================================
+
+    weight_utilizations = []
+    area_utilizations = []
+
+    for tr in trucks_v:
+
+        ttype = ftv.get(
+            tr.get("type")
+        )
+
+        if not ttype:
+            continue
+
+        weight_cap = getattr(
+            ttype,
+            "weight_cap",
+            0
+        )
+
+        area_cap = getattr(
+            ttype,
+            "area",
+            0
+        )
+
+        if weight_cap:
+
+            weight_utilizations.append(
+                min(
+                    float(tr.get("w", 0) or 0) /
+                    float(weight_cap),
+                    1
+                )
+            )
+
+        if area_cap:
+
+            area_utilizations.append(
+                min(
+                    float(tr.get("a", 0) or 0) /
+                    float(area_cap),
+                    1
+                )
+            )
+
+    avg_weight_util = (
+        sum(weight_utilizations) /
+        len(weight_utilizations) *
+        100
+        if weight_utilizations
+        else 0
+    )
+
+    avg_area_util = (
+        sum(area_utilizations) /
+        len(area_utilizations) *
+        100
+        if area_utilizations
+        else 0
+    )
+
+    # ============================================================
+    # KPI HEADER
+    # ============================================================
+
+    st.markdown(
+        '<div class="section-title">📊 Fleet Overview</div>',
+        unsafe_allow_html=True
+    )
+
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+    k1.metric(
+        "🚛 Fleet",
+        f"{total_trucks:,}"
+    )
+
+    k2.metric(
+        "📦 Items",
+        f"{total_items:,}"
+    )
+
+    k3.metric(
+        "📍 Stops",
+        f"{total_stops:,}"
+    )
+
+    k4.metric(
+        "🛣 Distance",
+        f"{total_distance:,.0f} km"
+    )
+
+    k5.metric(
+        "💰 Cost",
+        f"{total_cost:,.0f}"
+    )
+
+    k6.metric(
+        "⏱ Route Success",
+        f"{route_success_pct:.1f}%"
+    )
+
+    # ============================================================
+    # SECONDARY METRICS
+    # ============================================================
+
+    s1, s2, s3, s4 = st.columns(4)
+
+    s1.metric(
+        "Avg Distance / Truck",
+        f"{avg_distance:,.1f} km"
+    )
+
+    s2.metric(
+        "Avg Items / Truck",
+        f"{avg_items:,.1f}"
+    )
+
+    s3.metric(
+        "Avg Weight Utilization",
+        f"{avg_weight_util:.1f}%"
+    )
+
+    s4.metric(
+        "Avg Area Utilization",
+        f"{avg_area_util:.1f}%"
+    )
+
+    st.divider()
+
+    # ============================================================
+    # MAIN DASHBOARD TABS
+    # ============================================================
+
+    overview_tab, route_tab, cargo_tab = st.tabs(
+        [
+            "🌐 Fleet Network",
+            "🚛 Route Analysis",
+            "📦 Cargo Analysis"
+        ]
+    )
+
+    # ============================================================
+    # TAB 1 — FLEET NETWORK
+    # ============================================================
+
+    with overview_tab:
+
+        control_left, control_mid, control_right = st.columns(
+            [1.4, 1.2, 1.2]
+        )
+
+        # --------------------------------------------------------
+        # Route display mode
+        # --------------------------------------------------------
+
+        with control_left:
+
+            overview_mode = st.radio(
+                "Network view",
+                [
+                    "Top routes",
+                    "All routes"
+                ],
+                horizontal=True,
+                key="network_view_mode"
+            )
+
+        # --------------------------------------------------------
+        # Number of routes
+        # --------------------------------------------------------
+
+        with control_mid:
+
+            if overview_mode == "Top routes":
+
+                max_routes = st.slider(
+                    "Routes displayed",
+                    min_value=10,
+                    max_value=min(
+                        total_trucks,
+                        150
+                    ),
+                    value=min(
+                        total_trucks,
+                        40
+                    ),
+                    step=10,
+                    key="network_max_routes"
+                )
+
+            else:
+
+                max_routes = total_trucks
+
+                st.caption(
+                    f"Displaying all {total_trucks:,} routes"
+                )
+
+        # --------------------------------------------------------
+        # Sorting
+        # --------------------------------------------------------
+
+        with control_right:
+
+            route_sort = st.selectbox(
+                "Route ranking",
+                [
+                    "Longest routes",
+                    "Highest cost",
+                    "Most items",
+                    "Most stops"
+                ],
+                key="network_route_sort"
+            )
+
+        # --------------------------------------------------------
+        # Sort trucks
+        # --------------------------------------------------------
+
+        if route_sort == "Longest routes":
+
+            sorted_trucks = sorted(
+                trucks_v,
+                key=lambda x: x.get(
+                    "route_km",
+                    0
+                ),
+                reverse=True
+            )
+
+        elif route_sort == "Highest cost":
+
+            sorted_trucks = sorted(
+                trucks_v,
+                key=lambda x: x.get(
+                    "route_cost",
+                    0
+                ),
+                reverse=True
+            )
+
+        elif route_sort == "Most items":
+
+            sorted_trucks = sorted(
+                trucks_v,
+                key=lambda x: len(
+                    x.get("items", [])
+                ),
+                reverse=True
+            )
+
         else:
-            # compute layout once per destination-set
-            dest_key = tuple(sorted(Pv.items["d"].unique()))
-            if st.session_state.get("_viz_key") != dest_key:
-                with st.spinner("Computing network layout..."):
-                    st.session_state["_viz_pos"] = viz.compute_layout(Pv)
-                st.session_state["_viz_key"] = dest_key
-            positions = st.session_state["_viz_pos"]
 
-            left_col, right_col = st.columns([1, 3])
+            sorted_trucks = sorted(
+                trucks_v,
+                key=lambda x: len(
+                    x.get("stops", [])
+                ),
+                reverse=True
+            )
 
-            with left_col:
-                st.markdown("### 🚛 Truck Inspector")
-                truck_ids = [tr["id"] for tr in trucks_v]
-                sel_truck = st.selectbox("Select a truck", ["All trucks"] + truck_ids,
-                                         key="viz_truck_select")
+        visible_trucks = sorted_trucks[:max_routes]
 
-                if sel_truck != "All trucks":
-                    tr = next(t for t in trucks_v if t["id"] == sel_truck)
-                    ttype = ftv[tr["type"]]
+        # --------------------------------------------------------
+        # Network summary
+        # --------------------------------------------------------
 
-                    # ── header info ──
-                    st.markdown(f"**Type:** `{tr['type']}`")
-                    route_nodes = [Pv.depot] + tr.get("route", tr["stops"])
-                    # route with distances
-                    parts = [f"**{route_nodes[0]}**"]
-                    for ri in range(1, len(route_nodes)):
-                        seg_km = Pv.D.get(route_nodes[ri - 1], {}).get(route_nodes[ri], 0)
-                        parts.append(f" —({seg_km:.0f} km)→ **{route_nodes[ri]}**")
-                    st.markdown("".join(parts))
+        st.caption(
+            f"Showing **{len(visible_trucks):,}** of "
+            f"**{total_trucks:,}** optimized routes."
+        )
 
-                    # ── metrics row ──
-                    mc1, mc2 = st.columns(2)
-                    mc1.metric("Distance", f"{tr.get('route_km', 0):.0f} km")
-                    mc2.metric("Cost", f"{tr.get('route_cost', 0):,.0f}")
-                    mc3, mc4 = st.columns(2)
-                    mc3.metric("Items", len(tr["items"]))
-                    mc4.metric("Stops", len(tr["stops"]))
+        # --------------------------------------------------------
+        # Network map
+        # --------------------------------------------------------
 
-                    # ── utilisation bars ──
-                    w_pct = min(tr["w"] / ttype.weight_cap, 1.0) if ttype.weight_cap else 0
-                    a_pct = min(tr["a"] / ttype.area, 1.0) if ttype.area else 0
-                    st.markdown(f"**Weight:** {tr['w']:.0f} / {ttype.weight_cap:.0f} kg "
-                                f"({w_pct * 100:.0f}%)")
-                    st.progress(w_pct)
-                    st.markdown(f"**Area:** {tr['a']:.1f} / {ttype.area:.1f} m² "
-                                f"({a_pct * 100:.0f}%)")
-                    st.progress(a_pct)
+        try:
 
-                    st.markdown(f"**Hazard:** {', '.join(sorted(tr['classes']))}")
-                    on_time = tr.get("route_ok", None)
-                    if on_time is not None:
-                        st.markdown(f"**On-time:** {'✅ Yes' if on_time else '❌ No'}")
-                    st.markdown(f"**Depart:** {Pv.to_time(tr['S'])}")
+            fig_net = viz.build_figure(
+                Pv,
+                trucks_v,
+                selected_id=None,
+                positions=positions,
+                max_routes=max_routes
+            )
 
-                    # ── stop arrivals ──
-                    if "arrivals" in tr and tr["arrivals"]:
-                        st.markdown("**Arrivals:**")
-                        for stop in tr.get("route", tr["stops"]):
-                            arr_h = tr["arrivals"].get(stop)
-                            if arr_h is not None:
-                                st.write(f"📍 {stop}: {Pv.to_time(arr_h)}")
+            st.plotly_chart(
+                fig_net,
+                use_container_width=True,
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "displayModeBar": True
+                },
+                key="fleet_network_plot"
+            )
 
-                    # ── items table ──
-                    st.markdown("---")
-                    st.markdown(f"**📦 Items ({len(tr['items'])})**")
-                    items_df = Pv.items.iloc[tr["items"]][
-                        ["Order_ID", "Item_ID", "d", "w", "a", "h",
-                         "Available_Time", "Deadline"]
-                    ].rename(columns={"d": "Dest", "w": "Wt (kg)",
-                                      "a": "Area (m²)", "h": "Hazard"})
-                    st.dataframe(items_df.reset_index(drop=True),
-                                 width="stretch", height=300)
+        except Exception as e:
+
+            st.error(
+                f"Unable to render network map: {e}"
+            )
+
+        # --------------------------------------------------------
+        # Route ranking table
+        # --------------------------------------------------------
+
+        st.markdown(
+            '<div class="section-title">🏆 Route Ranking</div>',
+            unsafe_allow_html=True
+        )
+
+        ranking_rows = []
+
+        for rank, tr in enumerate(
+            visible_trucks,
+            start=1
+        ):
+
+            ranking_rows.append(
+                {
+                    "Rank": rank,
+                    "Truck": tr.get(
+                        "id",
+                        f"Truck-{rank}"
+                    ),
+                    "Vehicle": tr.get(
+                        "type",
+                        "Unknown"
+                    ),
+                    "Distance (km)": round(
+                        tr.get(
+                            "route_km",
+                            0
+                        ),
+                        1
+                    ),
+                    "Cost": round(
+                        tr.get(
+                            "route_cost",
+                            0
+                        ),
+                        2
+                    ),
+                    "Items": len(
+                        tr.get(
+                            "items",
+                            []
+                        )
+                    ),
+                    "Stops": len(
+                        tr.get(
+                            "stops",
+                            []
+                        )
+                    ),
+                    "Status": (
+                        "OK"
+                        if tr.get(
+                            "route_ok"
+                        ) is True
+                        else
+                        "Check"
+                        if tr.get(
+                            "route_ok"
+                        ) is False
+                        else
+                        "N/A"
+                    )
+                }
+            )
+
+        if ranking_rows:
+
+            ranking_df = pd.DataFrame(
+                ranking_rows
+            )
+
+            st.dataframe(
+                ranking_df,
+                width="stretch",
+                height=350,
+                hide_index=True
+            )
+
+    # ============================================================
+    # TAB 2 — ROUTE ANALYSIS
+    # ============================================================
+
+    with route_tab:
+
+        # --------------------------------------------------------
+        # Truck selection
+        # --------------------------------------------------------
+
+        route_select_col, route_info_col = st.columns(
+            [1.2, 2.8]
+        )
+
+        with route_select_col:
+
+            selected_truck_id = st.selectbox(
+                "🚛 Select truck",
+                truck_ids,
+                key="route_analysis_truck"
+            )
+
+        selected_truck = next(
+            (
+                t
+                for t in trucks_v
+                if str(t.get("id")) ==
+                str(selected_truck_id)
+            ),
+            None
+        )
+
+        if selected_truck is None:
+
+            st.error(
+                "Unable to find selected truck."
+            )
+
+        else:
+
+            truck_type = selected_truck.get(
+                "type",
+                "Unknown"
+            )
+
+            truck_class = ftv.get(
+                truck_type
+            )
+
+            # ----------------------------------------------------
+            # Truck header
+            # ----------------------------------------------------
+
+            with route_info_col:
+
+                st.markdown(
+                    f"### 🚛 {selected_truck_id}"
+                )
+
+                st.caption(
+                    f"Vehicle type: **{truck_type}**"
+                )
+
+            # ----------------------------------------------------
+            # Truck metrics
+            # ----------------------------------------------------
+
+            r1, r2, r3, r4, r5 = st.columns(5)
+
+            r1.metric(
+                "Distance",
+                f"{selected_truck.get('route_km', 0):,.1f} km"
+            )
+
+            r2.metric(
+                "Cost",
+                f"{selected_truck.get('route_cost', 0):,.0f}"
+            )
+
+            r3.metric(
+                "Items",
+                f"{len(selected_truck.get('items', [])):,}"
+            )
+
+            r4.metric(
+                "Stops",
+                f"{len(selected_truck.get('stops', [])):,}"
+            )
+
+            route_status = selected_truck.get(
+                "route_ok"
+            )
+
+            r5.metric(
+                "Status",
+                "✅ OK"
+                if route_status is True
+                else
+                "❌ Check"
+                if route_status is False
+                else
+                "—"
+            )
+
+            st.divider()
+
+            # ----------------------------------------------------
+            # Selected route map
+            # ----------------------------------------------------
+
+            map_col, detail_col = st.columns(
+                [2.4, 1]
+            )
+
+            with map_col:
+
+                st.markdown(
+                    "#### 🗺 Selected Route"
+                )
+
+                try:
+
+                    selected_fig = viz.build_figure(
+                        Pv,
+                        trucks_v,
+                        selected_id=selected_truck_id,
+                        positions=positions,
+                        max_routes=1
+                    )
+
+                    st.plotly_chart(
+                        selected_fig,
+                        use_container_width=True,
+                        config={
+                            "displaylogo": False,
+                            "scrollZoom": True,
+                            "displayModeBar": True
+                        },
+                        key="selected_route_plot"
+                    )
+
+                except Exception as e:
+
+                    st.error(
+                        f"Unable to render selected route: {e}"
+                    )
+
+            # ----------------------------------------------------
+            # Route details
+            # ----------------------------------------------------
+
+            with detail_col:
+
+                st.markdown(
+                    "#### 📍 Route"
+                )
+
+                route_nodes = (
+                    [Pv.depot] +
+                    selected_truck.get(
+                        "route",
+                        selected_truck.get(
+                            "stops",
+                            []
+                        )
+                    )
+                )
+
+                if route_nodes:
+
+                    for i, node in enumerate(
+                        route_nodes
+                    ):
+
+                        if i == 0:
+
+                            st.markdown(
+                                f"🏠 **{node}**"
+                            )
+
+                        else:
+
+                            previous = route_nodes[
+                                i - 1
+                            ]
+
+                            distance = (
+                                Pv.D
+                                .get(previous, {})
+                                .get(node, 0)
+                            )
+
+                            st.markdown(
+                                f"↓ **{node}**  \n"
+                                f"<small>{distance:.1f} km</small>",
+                                unsafe_allow_html=True
+                            )
+
+                st.markdown("---")
+
+                # ------------------------------------------------
+                # Capacity
+                # ------------------------------------------------
+
+                st.markdown(
+                    "#### 📊 Capacity"
+                )
+
+                if truck_class:
+
+                    weight_cap = getattr(
+                        truck_class,
+                        "weight_cap",
+                        0
+                    )
+
+                    area_cap = getattr(
+                        truck_class,
+                        "area",
+                        0
+                    )
+
+                    current_weight = (
+                        selected_truck.get(
+                            "w",
+                            0
+                        )
+                    )
+
+                    current_area = (
+                        selected_truck.get(
+                            "a",
+                            0
+                        )
+                    )
+
+                    weight_ratio = (
+                        min(
+                            current_weight /
+                            weight_cap,
+                            1
+                        )
+                        if weight_cap
+                        else 0
+                    )
+
+                    area_ratio = (
+                        min(
+                            current_area /
+                            area_cap,
+                            1
+                        )
+                        if area_cap
+                        else 0
+                    )
+
+                    st.write(
+                        f"Weight — "
+                        f"{current_weight:,.0f} / "
+                        f"{weight_cap:,.0f} kg"
+                    )
+
+                    st.progress(
+                        weight_ratio
+                    )
+
+                    st.write(
+                        f"Area — "
+                        f"{current_area:.1f} / "
+                        f"{area_cap:.1f} m²"
+                    )
+
+                    st.progress(
+                        area_ratio
+                    )
+
+                # ------------------------------------------------
+                # Hazard
+                # ------------------------------------------------
+
+                hazards = selected_truck.get(
+                    "classes",
+                    []
+                )
+
+                st.markdown(
+                    "#### ⚠️ Hazard Classes"
+                )
+
+                if hazards:
+
+                    st.write(
+                        ", ".join(
+                            sorted(
+                                str(x)
+                                for x in hazards
+                            )
+                        )
+                    )
+
                 else:
-                    # ── summary view ──
-                    max_vis = st.slider("Max routes to show", 5, min(len(trucks_v), 100),
-                                        min(len(trucks_v), 40), key="max_routes")
-                    st.caption(f"Showing {min(len(trucks_v), max_vis)} of "
-                               f"{len(trucks_v)} truck routes.")
-                    st.markdown("Select a truck above to inspect its cargo in detail.")
-                    st.markdown("---")
-                    st.markdown("**Fleet summary**")
-                    type_counts = {}
-                    for tr in trucks_v:
-                        type_counts[tr["type"]] = type_counts.get(tr["type"], 0) + 1
-                    for tname, cnt in sorted(type_counts.items()):
-                        st.write(f"`{tname}` — {cnt} truck(s)")
-                    st.metric("Total distance",
-                              f"{sum(t.get('route_km', 0) for t in trucks_v):,.0f} km")
-                    st.metric("Total items loaded",
-                              f"{sum(len(t['items']) for t in trucks_v):,}")
-                    
-                    # ── global items list ──
-                    st.markdown("---")
-                    st.markdown("**📦 All Loaded Items**")
-                    all_items_data = []
-                    for tr in trucks_v:
-                        for i in tr["items"]:
-                            row = Pv.items.iloc[i].copy()
-                            row["Truck_ID"] = tr["id"]
-                            all_items_data.append(row)
-                    if all_items_data:
-                        df_all = pd.DataFrame(all_items_data)[
-                            ["Truck_ID", "Order_ID", "Item_ID", "d", "w", "a"]
-                        ].rename(columns={"d": "Dest", "w": "Wt", "a": "Area"})
-                        st.dataframe(df_all, width="stretch", height=300)
 
-            with right_col:
-                sel_id = None if sel_truck == "All trucks" else sel_truck
-                max_rt = st.session_state.get("max_routes", 40) if not sel_id else 1
-                fig_net = viz.build_figure(Pv, trucks_v, selected_id=sel_id,
-                                           positions=positions, max_routes=max_rt)
-                st.plotly_chart(fig_net, use_container_width=True)
+                    st.caption(
+                        "No hazard classes"
+                    )
 
+            # ----------------------------------------------------
+            # Schedule
+            # ----------------------------------------------------
+
+            st.markdown(
+                "#### ⏱ Delivery Schedule"
+            )
+
+            arrivals = selected_truck.get(
+                "arrivals",
+                {}
+            )
+
+            schedule_rows = []
+
+            for sequence, node in enumerate(
+                route_nodes,
+                start=1
+            ):
+
+                arrival = arrivals.get(
+                    node
+                )
+
+                schedule_rows.append(
+                    {
+                        "Sequence": sequence,
+                        "Location": node,
+                        "Arrival": (
+                            Pv.to_time(arrival)
+                            if arrival is not None
+                            else "—"
+                        )
+                    }
+                )
+
+            if schedule_rows:
+
+                st.dataframe(
+                    pd.DataFrame(
+                        schedule_rows
+                    ),
+                    width="stretch",
+                    hide_index=True
+                )
+
+            # ----------------------------------------------------
+            # Cargo for selected truck
+            # ----------------------------------------------------
+
+            st.markdown(
+                "#### 📦 Loaded Cargo"
+            )
+
+            selected_items = selected_truck.get(
+                "items",
+                []
+            )
+
+            if selected_items:
+
+                try:
+
+                    cargo_columns = [
+                        "Order_ID",
+                        "Item_ID",
+                        "d",
+                        "w",
+                        "a",
+                        "h",
+                        "Available_Time",
+                        "Deadline"
+                    ]
+
+                    available_columns = [
+                        c
+                        for c in cargo_columns
+                        if c in Pv.items.columns
+                    ]
+
+                    route_cargo = (
+                        Pv.items
+                        .iloc[selected_items]
+                        [
+                            available_columns
+                        ]
+                        .copy()
+                    )
+
+                    route_cargo.rename(
+                        columns={
+                            "d": "Destination",
+                            "w": "Weight (kg)",
+                            "a": "Area (m²)",
+                            "h": "Hazard"
+                        },
+                        inplace=True
+                    )
+
+                    st.dataframe(
+                        route_cargo.reset_index(
+                            drop=True
+                        ),
+                        width="stretch",
+                        height=350,
+                        hide_index=True
+                    )
+
+                except Exception as e:
+
+                    st.error(
+                        f"Unable to load cargo table: {e}"
+                    )
+
+            else:
+
+                st.info(
+                    "No cargo assigned to this truck."
+                )
+
+    # ============================================================
+    # TAB 3 — CARGO ANALYSIS
+    # ============================================================
+
+    with cargo_tab:
+
+        st.markdown(
+            '<div class="section-title">📦 Cargo Distribution</div>',
+            unsafe_allow_html=True
+        )
+
+        # --------------------------------------------------------
+        # Build cargo dataframe
+        # --------------------------------------------------------
+
+        all_items_data = []
+
+        for tr in trucks_v:
+
+            truck_id = tr.get(
+                "id",
+                "Unknown"
+            )
+
+            for item_index in tr.get(
+                "items",
+                []
+            ):
+
+                try:
+
+                    row = Pv.items.iloc[
+                        item_index
+                    ].copy()
+
+                    row["Truck_ID"] = truck_id
+
+                    all_items_data.append(
+                        row
+                    )
+
+                except Exception:
+
+                    continue
+
+        if not all_items_data:
+
+            st.info(
+                "No cargo data available."
+            )
+
+        else:
+
+            cargo_df = pd.DataFrame(
+                all_items_data
+            )
+
+            # ----------------------------------------------------
+            # Cargo KPIs
+            # ----------------------------------------------------
+
+            total_weight = (
+                pd.to_numeric(
+                    cargo_df.get(
+                        "w",
+                        pd.Series(dtype=float)
+                    ),
+                    errors="coerce"
+                )
+                .fillna(0)
+                .sum()
+            )
+
+            total_area = (
+                pd.to_numeric(
+                    cargo_df.get(
+                        "a",
+                        pd.Series(dtype=float)
+                    ),
+                    errors="coerce"
+                )
+                .fillna(0)
+                .sum()
+            )
+
+            unique_orders = (
+                cargo_df["Order_ID"]
+                .nunique()
+                if "Order_ID"
+                in cargo_df.columns
+                else 0
+            )
+
+            unique_destinations = (
+                cargo_df["d"]
+                .nunique()
+                if "d"
+                in cargo_df.columns
+                else 0
+            )
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            c1.metric(
+                "📦 Items",
+                f"{len(cargo_df):,}"
+            )
+
+            c2.metric(
+                "⚖️ Total Weight",
+                f"{total_weight:,.1f} kg"
+            )
+
+            c3.metric(
+                "📐 Total Area",
+                f"{total_area:,.2f} m²"
+            )
+
+            c4.metric(
+                "📍 Destinations",
+                f"{unique_destinations:,}"
+            )
+
+            st.divider()
+
+            # ----------------------------------------------------
+            # Cargo filters
+            # ----------------------------------------------------
+
+            filter1, filter2 = st.columns(2)
+
+            with filter1:
+
+                if "d" in cargo_df.columns:
+
+                    destinations = sorted(
+                        cargo_df["d"]
+                        .dropna()
+                        .astype(str)
+                        .unique()
+                    )
+
+                    selected_destination = st.selectbox(
+                        "Filter by destination",
+                        ["All"] + destinations,
+                        key="cargo_destination_filter"
+                    )
+
+                else:
+
+                    selected_destination = "All"
+
+            with filter2:
+
+                if "Truck_ID" in cargo_df.columns:
+
+                    cargo_truck = st.selectbox(
+                        "Filter by truck",
+                        ["All"] +
+                        [
+                            str(x)
+                            for x in sorted(
+                                cargo_df[
+                                    "Truck_ID"
+                                ]
+                                .dropna()
+                                .unique()
+                            )
+                        ],
+                        key="cargo_truck_filter"
+                    )
+
+                else:
+
+                    cargo_truck = "All"
+
+            filtered_cargo = cargo_df.copy()
+
+            if (
+                selected_destination != "All"
+                and "d" in filtered_cargo.columns
+            ):
+
+                filtered_cargo = (
+                    filtered_cargo[
+                        filtered_cargo["d"]
+                        .astype(str)
+                        ==
+                        str(selected_destination)
+                    ]
+                )
+
+            if (
+                cargo_truck != "All"
+                and "Truck_ID"
+                in filtered_cargo.columns
+            ):
+
+                filtered_cargo = (
+                    filtered_cargo[
+                        filtered_cargo[
+                            "Truck_ID"
+                        ].astype(str)
+                        ==
+                        str(cargo_truck)
+                    ]
+                )
+
+            # ----------------------------------------------------
+            # Display cargo
+            # ----------------------------------------------------
+
+            display_columns = [
+                "Truck_ID",
+                "Order_ID",
+                "Item_ID",
+                "d",
+                "w",
+                "a",
+                "h",
+                "Available_Time",
+                "Deadline"
+            ]
+
+            display_columns = [
+                c
+                for c in display_columns
+                if c in filtered_cargo.columns
+            ]
+
+            display_cargo = (
+                filtered_cargo[
+                    display_columns
+                ]
+                .copy()
+            )
+
+            display_cargo.rename(
+                columns={
+                    "d": "Destination",
+                    "w": "Weight (kg)",
+                    "a": "Area (m²)",
+                    "h": "Hazard"
+                },
+                inplace=True
+            )
+
+            st.caption(
+                f"Showing **{len(display_cargo):,}** "
+                f"cargo items."
+            )
+
+            st.dataframe(
+                display_cargo.reset_index(
+                    drop=True
+                ),
+                width="stretch",
+                height=500,
+                hide_index=True
+            )
+
+            # ----------------------------------------------------
+            # Download
+            # ----------------------------------------------------
+
+            csv_data = display_cargo.to_csv(
+                index=False
+            )
+
+            st.download_button(
+                "⬇️ Download Cargo CSV",
+                data=csv_data,
+                file_name="optimized_cargo.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+    # ============================================================
+    # FOOTER
+    # ============================================================
+
+    st.divider()
+
+    st.caption(
+        f"Optimization result: {total_trucks:,} trucks · "
+        f"{total_items:,} items · "
+        f"{total_stops:,} stops · "
+        f"{total_distance:,.0f} km total route distance"
+    )
 # =====================================================================================
 # TAB 6 : compare heuristic vs exact on the same subset
 # =====================================================================================
