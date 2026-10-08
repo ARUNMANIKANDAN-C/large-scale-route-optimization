@@ -7,8 +7,6 @@ import pandas as pd
 from common import available_types
 import stage1
 import routing
-import master
-from candidate_clusters import generate_candidates
 from precheck import precheck
 
 
@@ -42,54 +40,44 @@ def _repair_split(P, bad_trucks, fleet, params, remaining):
     return tr, [(sub_items[i], r) for i, r in un]
 
 
-def _cluster_stage1(P, fleet, params, time_limit, candidate_pool=None, forbidden_signatures=None):
-    """Solve the overlapping-candidate master and optionally remove failed patterns."""
-    forbidden_signatures = forbidden_signatures or set()
-    if candidate_pool is None:
-        candidate_pool = generate_candidates(P, fleet, params, max_clusters_per_item=4)
-    filtered = [c for c in candidate_pool if frozenset(c.items) not in forbidden_signatures]
-    return master.solve_master(P, fleet, params, candidates=filtered, time_limit=time_limit), filtered
+def _load(P, fleet, params, method, time_limit, forbidden_pairs, log):
+    """Stage 1: exact MIP (falls back to the heuristic if it cannot produce a plan) or heuristic."""
+    if method == "exact":
+        trucks, unassigned, info = stage1.mip_loading(
+            P, fleet, params, time_limit=time_limit, forbidden_pairs=forbidden_pairs)
+        if info["status"] in ("infeasible", "no solution in time limit", "too large"):
+            why = info.get("message", info["status"])
+            log.append(f"Exact loading not used ({why}) -> heuristic loading used instead.")
+            trucks, unassigned, info = stage1.heuristic_loading(P, fleet, params)
+            info["status"] = f"heuristic fallback ({why})"
+        return trucks, unassigned, info
+    return stage1.heuristic_loading(P, fleet, params)
 
 
 def run(P, fleet, params, mode="full", stage1_method="heuristic", stage2_method="heuristic",
         time_limit=60, max_feedback=3, route_time_limit=15):
-    """Run loading + routing with optional overlapping-cluster master optimization.
+    """Run loading + routing.
 
-    stage1_method values: heuristic, exact, cluster.  ``cluster`` is the new default
-    research mode: generate overlapping candidate loading patterns, solve a set-
-    partitioning master, route the selected trucks, then remove failed patterns and
-    re-solve.
+    stage1_method : "heuristic" or "exact".
+    mode          : "full" (loading + routing), "loading" (Stage 1 only) or
+                    "routing" (Stage 2 on a heuristic baseline loading).
+
+    With the exact Stage 1, trucks that fail routing contribute city-pair cuts and the
+    loading is re-solved (up to ``max_feedback`` times). Anything still unroutable is
+    repaired afterwards by splitting it into single-stop trucks.
     """
     t0 = time.time()
     log = []
     pre = precheck(P, fleet, params)
     log += pre["messages"]
-    forbidden_signatures = set()
     forbidden_pairs = set()
-    candidate_pool = None
     trucks = unassigned = info1 = None
 
     if mode == "routing":
         stage1_method = "heuristic"
 
     for it in range(max_feedback + 1):
-        if stage1_method == "cluster":
-            (trucks, unassigned, info1), candidate_pool = _cluster_stage1(
-                P, fleet, params, time_limit, candidate_pool, forbidden_signatures)
-            if info1["status"] in {"infeasible", "no candidates", "incomplete candidate pool"}:
-                log.append("Cluster master could not produce a complete plan; falling back to heuristic loading.")
-                trucks, unassigned, info1 = stage1.heuristic_loading(P, fleet, params)
-                info1["status"] = "heuristic fallback (cluster master failure)"
-        elif stage1_method == "exact":
-            trucks, unassigned, info1 = stage1.mip_loading(
-                P, fleet, params, time_limit=time_limit, forbidden_pairs=forbidden_pairs)
-            if info1["status"] in ("infeasible", "no solution in time limit", "too large"):
-                why = info1.get("message", info1["status"])
-                log.append(f"Exact loading not used ({why}) -> heuristic loading used instead.")
-                trucks, unassigned, info1 = stage1.heuristic_loading(P, fleet, params)
-                info1["status"] = f"heuristic fallback ({why})"
-        else:
-            trucks, unassigned, info1 = stage1.heuristic_loading(P, fleet, params)
+        trucks, unassigned, info1 = _load(P, fleet, params, stage1_method, time_limit, forbidden_pairs, log)
 
         if mode == "loading":
             break
@@ -97,28 +85,24 @@ def run(P, fleet, params, mode="full", stage1_method="heuristic", stage2_method=
         bad = _stage2(P, trucks, fleet, params, stage2_method, route_time_limit)
         if not bad:
             break
+        # Only the exact model can learn from a routing failure, and only if it was really used.
+        if stage1_method != "exact" or info1["status"].startswith("heuristic fallback"):
+            break
 
+        before = len(forbidden_pairs)
         for tr in bad:
-            signature = frozenset(tr.get("items", []))
-            if stage1_method == "cluster" and signature:
-                forbidden_signatures.add(signature)
-            elif stage1_method == "exact":
-                for a in range(len(tr["stops"])):
-                    for b in range(a + 1, len(tr["stops"])):
-                        forbidden_pairs.add((tr["stops"][a], tr["stops"][b]))
-        if stage1_method == "cluster":
-            log.append(f"Feedback {it + 1}: {len(bad)} truck(s) failed routing; "
-                       f"{len(forbidden_signatures)} candidate pattern(s) removed.")
-        elif stage1_method == "exact":
-            log.append(f"Feedback {it + 1}: {len(bad)} truck(s) failed routing; "
-                       f"{len(forbidden_pairs)} city-pair cuts added.")
-        if stage1_method != "cluster":
+            for a in range(len(tr["stops"])):
+                for b in range(a + 1, len(tr["stops"])):
+                    forbidden_pairs.add((tr["stops"][a], tr["stops"][b]))
+        log.append(f"Feedback {it + 1}: {len(bad)} truck(s) failed routing; "
+                   f"{len(forbidden_pairs)} city-pair cut(s) in total.")
+        if len(forbidden_pairs) == before:      # nothing new to learn -> re-solving would repeat itself
             break
 
     if trucks is None:
         trucks, unassigned, info1 = [], [], {"status": "no solution"}
 
-    # Repair only after the integrated feedback loop is exhausted.
+    # Repair only after the feedback loop is exhausted.
     if mode != "loading":
         bad = [tr for tr in trucks if not tr.get("route_ok", True)]
         if bad:

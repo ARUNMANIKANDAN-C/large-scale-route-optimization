@@ -1,7 +1,55 @@
-"""Feasibility pre-check: item validation, deadline verification, fleet capacity bounds."""
+"""Feasibility pre-check: item validation, deadline verification, fleet capacity bounds,
+and a summary of the planning window (start date, deadlines, slack)."""
 import math
 import pandas as pd
 from common import available_types
+
+
+def _when(P, hours):
+    """Hours since time zero -> readable date/time (falls back to 't = x h')."""
+    try:
+        return str(P.to_time(float(hours)))
+    except Exception:
+        return f"t = {float(hours):.1f} h"
+
+
+def planning_window(P, params, max_speed):
+    """When does planning start, when must everything be delivered, and how tight are the deadlines?
+
+    Time zero of the data is converted with ``P.to_time``. Planning starts when the first item
+    becomes available; every truck then leaves when the LAST item on it is available.
+    """
+    df = P.items
+    if df.empty:
+        return {}
+
+    e, l = df["e"].astype(float), df["l"].astype(float)
+    start_h, end_h = float(e.min()), float(l.max())
+
+    # slack = how much waiting/delay an item can still absorb on the fastest possible trip
+    dist = df["d"].map(lambda d: P.D.get(P.depot, {}).get(d))
+    travel = pd.to_numeric(dist, errors="coerce") / max_speed if max_speed > 0 else float("nan")
+    slack = (l - e - travel - params.unload_h).dropna()
+    window_d = (l - e) / 24.0
+
+    return {
+        "depot": P.depot,
+        "start": _when(P, start_h),
+        "end": _when(P, end_h),
+        "horizon_days": (end_h - start_h) / 24.0,
+        "last_available": _when(P, e.max()),
+        "earliest_deadline": _when(P, l.min()),
+        "latest_deadline": _when(P, l.max()),
+        "window_days": (float(window_d.min()), float(window_d.median()), float(window_d.max())),
+        "slack_min_h": float(slack.min()) if len(slack) else float("nan"),
+        "slack_median_h": float(slack.median()) if len(slack) else float("nan"),
+        "tight_items": int((slack < 24).sum()),
+        "n_items": len(df),
+        "n_destinations": int(df["d"].nunique()),
+        "farthest_km": float(pd.to_numeric(dist, errors="coerce").max()),
+        "heaviest_kg": float(df["w"].max()),
+        "hazard_counts": df["h"].value_counts().to_dict(),
+    }
 
 
 def precheck(P, fleet, params):
@@ -14,6 +62,7 @@ def precheck(P, fleet, params):
             - 'bound_table': pd.DataFrame
             - 'n_min': int
             - 'bad_items': pd.DataFrame
+            - 'window': dict  (planning start, deadlines, slack; see planning_window)
     """
     avail = available_types(fleet)
     messages = []
@@ -26,6 +75,7 @@ def precheck(P, fleet, params):
             "bound_table": pd.DataFrame(),
             "n_min": 0,
             "bad_items": pd.DataFrame(),
+            "window": {},
         }
 
     max_weight_cap = max(t.weight_cap for t in avail)
@@ -144,4 +194,5 @@ def precheck(P, fleet, params):
         "bound_table": bound_table,
         "n_min": total_min_trucks,
         "bad_items": bad_items,
+        "window": planning_window(P, params, max_speed),
     }
