@@ -25,7 +25,9 @@ DISTANCE_FILE = os.path.join(HERE, "distance(1).csv")
 
 st.set_page_config(page_title="Cargo Loading & Route Planning", layout="wide")
 st.title("Cargo Loading and Route Planning")
-st.caption("Operations Research project - overlapping candidate-cluster master (set partitioning) + Stage 2 TSP with time windows.")
+st.caption("Operations Research project")
+
+
 
 # =====================================================================================
 # SIDEBAR : inputs
@@ -79,6 +81,7 @@ params = Params(max_stops=int(N), unload_h=float(M), stop_cost=float(f_cost), de
 
 
 # ---------------- load data ------------------------------------------------------------
+# Reads and caches uploaded order CSV files and distance matrix into Pandas DataFrames.
 @st.cache_data(show_spinner=False)
 def _load(order_blobs, dist_blob, merge):
     import io
@@ -114,9 +117,9 @@ except Exception as e:  # noqa
 for msg in data.check_coverage(P_all):
     st.warning(msg)
 
-tab_data, tab_pre, tab_opt, tab_res, tab_viz, tab_cmp, tab_sens = st.tabs(
+tab_data, tab_pre, tab_opt, tab_res, tab_viz, tab_sens = st.tabs(
     ["Data and statistics", "Feasibility pre-check", "Optimize", "Results",
-     "Network & Routes", "Compare methods", "Sensitivity"])
+     "Network & Routes", "Sensitivity"])
 
 # =====================================================================================
 # TAB 1 : data + statistics (on demand)
@@ -252,8 +255,12 @@ with tab_opt:
     mc1, mc2 = st.columns(2)
     s1m = mc1.selectbox("Stage 1 method", [
         "Heuristic (best-fit packing + merging)",
-        "Exact (integer program, CBC)"])
-    s2m = mc2.selectbox("Stage 2 method", ["Heuristic (nearest neighbour + 2-opt)", "Exact (MIP, CBC)"])
+        #"Exact (integer program, CBC)"
+        ])
+    s2m = mc2.selectbox("Stage 2 method", [
+        "Heuristic (nearest neighbour + 2-opt)", 
+        #"Exact (MIP, CBC)"
+        ])
     s1m = "exact" if s1m.startswith("Exact") else "heuristic"
     s2m = "exact" if s2m.startswith("Exact") else "heuristic"
     tl = st.slider("Time limit for exact Stage 1 (seconds)", 5, 300, 60)
@@ -286,11 +293,13 @@ CARGO_COLS = ["Truck_ID", "Order_ID", "Item_ID", "d", "w", "a", "h", "Available_
 
 
 # ----------------------------------------------------------------- helpers
+# Constructs the complete circular route sequence starting from depot, through stops, and returning to depot.
 def path_of(P, t):
     stops = [n for n in (t.get("route") or t.get("stops") or []) if n != P.depot]
     return [P.depot] + stops + [P.depot]
 
 
+# Computes radial coordinates for stops positioned by distance from the central depot.
 def radial_layout(P, trucks):
     """Depot at centre; each destination sits on a ring whose radius = distance
     from depot. Nodes of the same truck share an angular sector."""
@@ -310,6 +319,7 @@ def radial_layout(P, trucks):
     return pos, dist, rmax
 
 
+# Renders an interactive Plotly network diagram of depot, destinations, and truck routes.
 def network_fig(P, trucks, pos, dist, rmax, selected=None):
     fig = go.Figure()
 
@@ -359,6 +369,7 @@ def network_fig(P, trucks, pos, dist, rmax, selected=None):
     return fig
 
 
+# Builds a focused Plotly diagram visualizing the sequential legs, arrival times, and stops of a single truck.
 def route_fig(P, t, pos, dist, rmax, step=None):
     """Single-truck view: zoomed to the path, only its legs/stops are highlighted."""
     p = [n for n in path_of(P, t) if n in pos]
@@ -404,11 +415,13 @@ def route_fig(P, t, pos, dist, rmax, step=None):
     return fig
 
 
+# Advances or reverses the currently selected truck index within the Streamlit session state.
 def _step(d, ids):
     cur = ids.index(st.session_state.get("rt_sel", ids[0]))
     st.session_state["rt_sel"] = ids[(cur + d) % len(ids)]
 
 
+# Aggregates and formats item-level cargo records for the specified trucks into a display DataFrame.
 def cargo_frame(P, trucks):
     parts = []
     for t in trucks:
@@ -422,11 +435,13 @@ def cargo_frame(P, trucks):
     return df[[c for c in CARGO_COLS if c in df.columns]].rename(columns=RENAME).reset_index(drop=True)
 
 
+# Formats the truck route feasibility flag into a visual status indicator badge.
 def status(t):
     return {True: "✅ OK", False: "❌ Check"}.get(t.get("route_ok"), "—")
 
 
 # ------------------------------------------------------------------ tab
+# Renders the Network & Routes visualization dashboard tab including network plots and route details.
 def render_viz():
     st.subheader("Network & Route Analytics")
 
@@ -450,6 +465,7 @@ def render_viz():
     stops = sum(len(t.get("stops", [])) for t in trucks)
     chk = [t["route_ok"] for t in trucks if t.get("route_ok") is not None]
 
+    # Calculates average fleet capacity utilization percentage for weight or area across active trucks.
     def util(key, cap_attr):
         v = [min(float(t.get(key) or 0) / c, 1) for t in trucks
              if (c := getattr(ftype.get(t.get("type")), cap_attr, 0))]
@@ -614,40 +630,40 @@ with tab_res:
         d1.download_button("Download truck plan (CSV)", tt.to_csv(index=False).encode(), "truck_plan.csv", "text/csv")
         d2.download_button("Download item assignment (CSV)", it.to_csv(index=False).encode(), "item_assignment.csv",
                            "text/csv")
-# =====================================================================================
-# TAB 6 : compare heuristic vs exact on the same subset
-# =====================================================================================
-with tab_cmp:
-    st.subheader("Heuristic vs exact on the same subset")
-    st.caption("The exact model can only be solved for small subsets, so use a few destinations or 'Max items' "
-               "(about 10-25 items).")
-    tl2 = st.slider("Time limit for the exact model (s)", 5, 300, 60, key="cmp_time_limit")
+# # =====================================================================================
+# # TAB 6 : compare heuristic vs exact on the same subset
+# # =====================================================================================
+# with tab_cmp:
+#     st.subheader("Heuristic vs exact on the same subset")
+#     st.caption("The exact model can only be solved for small subsets, so use a few destinations or 'Max items' "
+#                "(about 10-25 items).")
+#     tl2 = st.slider("Time limit for the exact model (s)", 5, 300, 60, key="cmp_time_limit")
 
-    if st.button("Run comparison", key="cmp_run"):
-        if len(P_scope.items) > stage1.MAX_EXACT_ITEMS:
-            st.warning(f"More than {stage1.MAX_EXACT_ITEMS} items: the exact model is skipped and the heuristic "
-                       f"plan is shown for both rows. Select fewer destinations / 'Max items'.")
-        rows = []
-        with st.spinner("Solving both..."):
-            for name, a1, a2 in [("Heuristic", "heuristic", "heuristic"),
-                                 ("Exact (MIP)", "exact", "exact")]:
-                r = pipeline.run(P_scope, fleet, params, "full", a1, a2, time_limit=tl2)
-                mm = r["metrics"]
-                rows.append({
-                    "Method": name,
-                    "Status": r["info1"]["status"],
-                    "Trucks": mm["trucks_used"],
-                    "Stage 1 cost": round(mm["stage1_estimate"]),
-                    "Total cost": round(mm.get("total_cost", float("nan"))),
-                    "Distance km": round(mm.get("distance_km", float("nan"))),
-                    "Unassigned": mm["items_unassigned"],
-                    "Seconds": round(r["seconds"], 1),
-                    "Violations": len(pipeline.validate(P_scope, r, fleet, params)),
-                })
-        cmp_df = pd.DataFrame(rows)
-        st.dataframe(cmp_df, width="stretch", hide_index=True)
-        st.plotly_chart(px.bar(cmp_df, x="Method", y="Total cost", text="Total cost"),
-                        width="stretch", key="cmp_chart")
+#     if st.button("Run comparison", key="cmp_run"):
+#         if len(P_scope.items) > stage1.MAX_EXACT_ITEMS:
+#             st.warning(f"More than {stage1.MAX_EXACT_ITEMS} items: the exact model is skipped and the heuristic "
+#                        f"plan is shown for both rows. Select fewer destinations / 'Max items'.")
+#         rows = []
+#         with st.spinner("Solving both..."):
+#             for name, a1, a2 in [("Heuristic", "heuristic", "heuristic"),
+#                                  ("Exact (MIP)", "exact", "exact")]:
+#                 r = pipeline.run(P_scope, fleet, params, "full", a1, a2, time_limit=tl2)
+#                 mm = r["metrics"]
+#                 rows.append({
+#                     "Method": name,
+#                     "Status": r["info1"]["status"],
+#                     "Trucks": mm["trucks_used"],
+#                     "Stage 1 cost": round(mm["stage1_estimate"]),
+#                     "Total cost": round(mm.get("total_cost", float("nan"))),
+#                     "Distance km": round(mm.get("distance_km", float("nan"))),
+#                     "Unassigned": mm["items_unassigned"],
+#                     "Seconds": round(r["seconds"], 1),
+#                     "Violations": len(pipeline.validate(P_scope, r, fleet, params)),
+#                 })
+#         cmp_df = pd.DataFrame(rows)
+#         st.dataframe(cmp_df, width="stretch", hide_index=True)
+#         st.plotly_chart(px.bar(cmp_df, x="Method", y="Total cost", text="Total cost"),
+#                         width="stretch", key="cmp_chart")
 
 
 # =====================================================================================
@@ -671,7 +687,7 @@ with tab_sens:
     vals = st.text_input("Values (comma separated)", default_vals, key=f"sens_vals_{attr or 'trucks'}")
 
     m1, m2 = st.columns([1.4, 1])
-    method = m1.radio("Solver", ["Heuristic", "Exact (MIP)"], horizontal=True, key="sens_method",
+    method = m1.radio("Solver", ["Heuristic"], horizontal=True, key="sens_method",
                       help="Exact is only practical for small subsets (about 10-25 items).")
     algo = "exact" if method.startswith("Exact") else "heuristic"
     tl_s = m2.slider("Time limit per scenario (s)", 5, 300, 60, key="sens_time_limit",

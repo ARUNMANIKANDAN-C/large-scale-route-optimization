@@ -13,6 +13,7 @@ AREA_DIV = 1e4
 WEIGHT_DIV = 1e4
 
 
+# Reads CSV data from a file path, file-like object, or Streamlit upload into a DataFrame.
 def read_csv_any(src):
     """src can be a path, a file-like object or an uploaded Streamlit file."""
     if hasattr(src, "read"):
@@ -20,6 +21,7 @@ def read_csv_any(src):
     return pd.read_csv(src)
 
 
+# Reads and merges multiple order CSV files, dropping duplicate item IDs.
 def read_orders(sources):
     """Read one or several order files and concatenate them (duplicate Item_IDs dropped)."""
     frames = []
@@ -37,6 +39,7 @@ def read_orders(sources):
 class Problem:
     """Orders + distance matrix in model units."""
 
+    # Initializes problem instance by standardizing order units, calculating time offsets, and loading distances.
     def __init__(self, orders: pd.DataFrame, dist: pd.DataFrame, t0=None):
         df = orders.copy()
         df["Available_Time"] = pd.to_datetime(df["Available_Time"])
@@ -53,6 +56,7 @@ class Problem:
         self.D = build_distance(dist)
 
     # ------------------------------------------------------------------
+    # Creates a filtered sub-problem containing a subset of destinations, items, or orders.
     def subset(self, destinations=None, max_items=None, order_ids=None):
         df = self.items
         mask = pd.Series(True, index=df.index)
@@ -68,16 +72,19 @@ class Problem:
         new.items = df.reset_index(drop=True)
         return new
 
+    # Returns the travel distance in km between two locations from the distance matrix.
     def dist(self, a, b):
         try:
             return self.D[a][b]
         except KeyError:
             raise ValueError(f"No distance from '{a}' to '{b}' in the distance matrix")
 
+    # Converts an elapsed hour offset from reference time t0 into a pandas Timestamp.
     def to_time(self, hours):
         return (self.t0 + pd.to_timedelta(round(hours * 3600), unit="s"))
 
 
+# Constructs a symmetric nested dictionary of pairwise distances in km from a DataFrame.
 def build_distance(df: pd.DataFrame):
     """Dict-of-dicts distance in km. Missing (a,b) falls back to (b,a)."""
     if not {"Source", "Destination"}.issubset(df.columns):
@@ -99,6 +106,7 @@ def build_distance(df: pd.DataFrame):
     return D
 
 
+# Verifies that all destination cities have known distance entries from the depot.
 def check_coverage(P: Problem):
     """Return a list of problems with the data (cities with no distance, etc.)."""
     msgs = []
@@ -110,6 +118,7 @@ def check_coverage(P: Problem):
 
 
 # ----------------------------------------------------------------------
+# Computes descriptive summary statistics on cargo weight, area, destinations, and time windows.
 def statistics(P: Problem):
     df = P.items
     out = {}

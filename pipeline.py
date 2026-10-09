@@ -10,10 +10,12 @@ import routing
 from precheck import precheck
 
 
+# Builds a dictionary mapping truck type names to their TruckType definition objects.
 def _fleet_map(fleet):
     return {t.name: t for t in fleet}
 
 
+# Solves route sequences for all trucks and returns any trucks that violated deadlines.
 def _stage2(P, trucks, fleet, params, method, time_limit):
     ft = _fleet_map(fleet)
     for tr in trucks:
@@ -21,6 +23,7 @@ def _stage2(P, trucks, fleet, params, method, time_limit):
     return [tr for tr in trucks if not tr.get("route_ok", True)]
 
 
+# Re-plans unroutable multi-stop trucks as dedicated single-stop trips to guarantee feasibility.
 def _repair_split(P, bad_trucks, fleet, params, remaining):
     """Split trucks whose stops cannot all meet their deadlines into single-stop trucks."""
     p1 = copy.copy(params)
@@ -40,6 +43,7 @@ def _repair_split(P, bad_trucks, fleet, params, remaining):
     return tr, [(sub_items[i], r) for i, r in un]
 
 
+# Solves Stage 1 item-to-truck assignment using exact MIP or falls back to heuristic loading.
 def _load(P, fleet, params, method, time_limit, forbidden_pairs, log):
     """Stage 1: exact MIP (falls back to the heuristic if it cannot produce a plan) or heuristic."""
     if method == "exact":
@@ -54,6 +58,7 @@ def _load(P, fleet, params, method, time_limit, forbidden_pairs, log):
     return stage1.heuristic_loading(P, fleet, params)
 
 
+# Orchestrates the end-to-end loading, routing, iterative feedback cuts, and repair pipeline.
 def run(P, fleet, params, mode="full", stage1_method="heuristic", stage2_method="heuristic",
         time_limit=60, max_feedback=3, route_time_limit=15):
     """Run loading + routing.
@@ -85,7 +90,6 @@ def run(P, fleet, params, mode="full", stage1_method="heuristic", stage2_method=
         bad = _stage2(P, trucks, fleet, params, stage2_method, route_time_limit)
         if not bad:
             break
-        # Only the exact model can learn from a routing failure, and only if it was really used.
         if stage1_method != "exact" or info1["status"].startswith("heuristic fallback"):
             break
 
@@ -132,6 +136,7 @@ def run(P, fleet, params, mode="full", stage1_method="heuristic", stage2_method=
 
 
 # --------------------------------------------------------------------------------------
+# Computes aggregate performance metrics including costs, distances, fleet counts, and utilization.
 def metrics(P, res, fleet, params):
     ft = _fleet_map(fleet)
     trucks = res["trucks"]
@@ -156,6 +161,7 @@ def metrics(P, res, fleet, params):
     return m
 
 
+# Formats the optimized truck assignment into a detailed summary DataFrame.
 def truck_table(P, res, fleet):
     ft = _fleet_map(fleet)
     rows = []
@@ -174,6 +180,7 @@ def truck_table(P, res, fleet):
     return pd.DataFrame(rows)
 
 
+# Converts the optimization results into a Kaggle-compliant item-level output DataFrame.
 def item_table(P, res):
     """Kaggle-style output: one row per item."""
     df = P.items
@@ -196,6 +203,7 @@ def item_table(P, res):
 
 
 # --------------------------------------------------------------------------------------
+# Performs an independent verification of all operational, capacity, and deadline constraints.
 def validate(P, res, fleet, params, tol=1e-6):
     """Independent re-check of every constraint on the FINAL plan. Returns list of violations."""
     ft = _fleet_map(fleet)

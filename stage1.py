@@ -21,6 +21,7 @@ import routing
 
 
 # --------------------------------------------------------------------------------
+# Caches and returns item attributes as contiguous python lists for fast indexing.
 def _arr(P):
     if not hasattr(P, "_arr"):
         df = P.items
@@ -29,6 +30,7 @@ def _arr(P):
     return P._arr
 
 
+# Creates a truck dictionary summarizing cargo weights, area, hazard classes, and earliest deadlines.
 def make_truck(P, idxs, type_name=None):
     A = _arr(P)
     idxs = list(idxs)
@@ -45,6 +47,7 @@ def make_truck(P, idxs, type_name=None):
     )
 
 
+# Computes a theoretical lower-bound distance in km for a truck serving a given set of stops.
 def route_lb(P, stops, ret):
     """Lower bound R_v on the route length of a truck that visits `stops` (km).
        single stop : D(0,c)            (x2 for a round trip)
@@ -63,6 +66,7 @@ def route_lb(P, stops, ret):
     return lb
 
 
+# Evaluates the Stage 1 objective cost combining estimated distance, stop charges, and truck fixed costs.
 def stage1_objective(P, trucks, fleet, params):
     """Z1 = sum_v c_t R_v + f * stops + fixed truck cost,  R_v = route_lb(...)"""
     ft = {t.name: t for t in fleet}
@@ -77,6 +81,7 @@ def stage1_objective(P, trucks, fleet, params):
 # ================================================================================
 # HEURISTIC
 # ================================================================================
+# Assigns items to trucks using best-fit-decreasing packing, savings-based merges, and fleet-aware sizing.
 def heuristic_loading(P, fleet, params):
     t_start = time.time()
     types = available_types(fleet)
@@ -87,11 +92,14 @@ def heuristic_loading(P, fleet, params):
     delta = params.delta_h
     unassigned = []
 
+    # Checks if the given weight and area can fit into at least one available truck type.
     def fits_some(w, a):
         return any(t.weight_cap + 1e-9 >= w and t.area + 1e-9 >= a for t in types)
 
+    # Checks if all hazard classes between two cargo collections are mutually compatible.
     def hz_ok(c1, c2):
         return all(params.compatible(x, y) for x in c1 for y in c2)
+
 
     # ---------------- 1. best-fit-decreasing packing per destination ------------
     by_dest = {}
@@ -255,6 +263,7 @@ def heuristic_loading(P, fleet, params):
 MAX_EXACT_ITEMS = 60
 
 
+# Formulates and solves an exact mixed-integer programming (MIP) model to optimally load items into trucks.
 def mip_loading(P, fleet, params, time_limit=60, forbidden_pairs=(), margin=2, max_items=MAX_EXACT_ITEMS):
     t_start = time.time()
     types = available_types(fleet)

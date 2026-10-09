@@ -5,6 +5,7 @@ import pandas as pd
 from common import available_types
 
 
+# Converts elapsed hours from time zero into a formatted calendar string or fallback hour label.
 def _when(P, hours):
     """Hours since time zero -> readable date/time (falls back to 't = x h')."""
     try:
@@ -13,6 +14,7 @@ def _when(P, hours):
         return f"t = {float(hours):.1f} h"
 
 
+# Calculates the overall planning horizon, arrival deadlines, and deadline slack for all items.
 def planning_window(P, params, max_speed):
     """When does planning start, when must everything be delivered, and how tight are the deadlines?
 
@@ -52,6 +54,7 @@ def planning_window(P, params, max_speed):
     }
 
 
+# Validates item delivery feasibility against fleet capacities and computes theoretical lower bounds on required trucks.
 def precheck(P, fleet, params):
     """Perform pre-optimization feasibility checks and calculate theoretical bounds.
 

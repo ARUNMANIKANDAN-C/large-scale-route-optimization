@@ -20,6 +20,7 @@ class TruckType:
     fixed_cost: float = 0.0       # optional cost per truck used
 
 
+# Returns the default list of truck types and their specifications based on the Kaggle dataset.
 def default_fleet():
     # Values from the Kaggle dataset description (inner size = length x width)
     return [
@@ -29,6 +30,7 @@ def default_fleet():
     ]
 
 
+# Returns default hazardous materials incompatibility pairs where non-danger cannot mix with hazardous.
 def default_incompatible():
     """Hazard rule agreed in the project: type_1 and type_2 may share a truck,
     non_danger may never share with type_1 / type_2."""
@@ -45,10 +47,13 @@ class Params:
     allow_multi_stop: bool = True  # heuristic: try to merge trucks of nearby cities
     incompatible: Set[FrozenSet[str]] = field(default_factory=default_incompatible)
 
+    # Checks whether two hazard classes are compatible to share the same truck.
     def compatible(self, a: str, b: str) -> bool:
         return a == b or frozenset((a, b)) not in self.incompatible
 
 
+# Filters and returns truck types that currently have available inventory.
 def available_types(fleet):
     """Truck types that may be used (count is None = unlimited, or count > 0)."""
     return [t for t in fleet if t.count is None or t.count > 0]
+

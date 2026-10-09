@@ -13,6 +13,7 @@ import pulp
 
 
 # ----------------------------------------------------------------------------------
+# Evaluates a candidate sequence of stops for total travel distance, arrival times, and deadline feasibility.
 def eval_order(order, start, L, D, depot, speed, M, ret):
     """Evaluate a visiting order. Returns (distance_km, feasible, arrivals dict)."""
     t, prev, dist, feas = start, depot, 0.0, True
@@ -31,6 +32,7 @@ def eval_order(order, start, L, D, depot, speed, M, ret):
     return dist, feas, arr
 
 
+# Finds the optimal visiting sequence by checking all stop permutations for small instances.
 def best_route_enum(stops, start, L, D, depot, speed, M, ret):
     """Exact by enumeration (use only for a handful of stops)."""
     best = None
@@ -41,6 +43,7 @@ def best_route_enum(stops, start, L, D, depot, speed, M, ret):
     return best  # None if no feasible order
 
 
+# Finds a low-cost feasible stop sequence using nearest-neighbor / EDF heuristic starts and 2-opt search.
 def heuristic_route(stops, start, L, D, depot, speed, M, ret):
     """Nearest neighbour + earliest-deadline-first starts, then 2-opt. Returns (dist, order) or None."""
     stops = list(stops)
@@ -48,6 +51,7 @@ def heuristic_route(stops, start, L, D, depot, speed, M, ret):
         d, f, _ = eval_order(stops, start, L, D, depot, speed, M, ret)
         return (d, stops) if f else None
 
+    # Evaluates distance and feasibility for a candidate stop sequence.
     def ev(o):
         d, f, _ = eval_order(o, start, L, D, depot, speed, M, ret)
         return d, f
@@ -80,6 +84,7 @@ def heuristic_route(stops, start, L, D, depot, speed, M, ret):
     return bd, best
 
 
+# Calculates total tardiness (hours past deadline) accumulated along a candidate route.
 def _tardiness(order, start, L, D, depot, speed, M):
     t, prev, tot = start, depot, 0.0
     for c in order:
@@ -90,6 +95,7 @@ def _tardiness(order, start, L, D, depot, speed, M):
     return tot
 
 
+# Performs local search stop-relocation moves to eliminate tardiness and achieve feasibility.
 def _repair(order, start, L, D, depot, speed, M, ret):
     """Local search (move one stop to another position) that reduces total lateness to 0."""
     order = list(order)
@@ -114,6 +120,7 @@ def _repair(order, start, L, D, depot, speed, M, ret):
     return order if cur <= 1e-9 else None
 
 
+# Solves an exact MIP with MTZ-style time propagation to determine the optimal stop sequence.
 def mip_route(stops, start, L, D, depot, speed, M, ret, time_limit=20):
     """Exact MIP (equations of Stage 2).  Returns (dist, order) or None if infeasible."""
     stops = list(stops)
@@ -161,6 +168,7 @@ def mip_route(stops, start, L, D, depot, speed, M, ret, time_limit=20):
 
 
 # ----------------------------------------------------------------------------------
+# Plans and populates the route, distances, arrival times, feasibility, and costs for a single truck.
 def route_truck(P, truck, ttype, params, method="heuristic", mip_limit=9, time_limit=20):
     """Fill truck['route'], ['route_km'], ['arrivals'], ['route_ok'], ['route_cost'], ['route_method']."""
     D, depot = P.D, P.depot
