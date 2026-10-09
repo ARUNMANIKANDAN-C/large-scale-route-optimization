@@ -1,5 +1,0 @@
-streamlit>=1.40
-pandas>=2.0
-numpy
-plotly>=5
-pulp>=2.8,<4
